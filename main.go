@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,19 +23,22 @@ import (
 )
 
 const (
-	defaultModuleID   = "com.nekkus.vpn"
-	defaultVersion    = "0.1.0"
-	defaultListenAddr = "127.0.0.1:50061"
-	defaultHTTPAddr   = "127.0.0.1:8081"
-	defaultDataDir    = "data"
+	defaultModuleID    = "com.nekkus.vpn"
+	defaultVersion     = "0.1.0"
+	defaultListenAddr  = "127.0.0.1:50061"
+	defaultHTTPAddr    = "127.0.0.1:8081"
+	defaultDataDir     = "data"
+	defaultHTTPTimeout = 10 * time.Second
 )
 
 type vpnConfig struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Content   string `json:"content"`
-	SourceURL string `json:"source_url,omitempty"`
-	CreatedAt int64  `json:"created_at"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Content        string `json:"content"`
+	SourceURL      string `json:"source_url,omitempty"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }
 
 type configStore struct {
@@ -85,6 +90,22 @@ func (s *configStore) add(config vpnConfig) (vpnConfig, error) {
 	return config, s.save()
 }
 
+func (s *configStore) updateContent(configID, content string) (vpnConfig, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, config := range s.configs {
+		if config.ID == configID {
+			config.Content = content
+			config.UpdatedAt = time.Now().Unix()
+			s.configs[index] = config
+			return config, true, s.save()
+		}
+	}
+
+	return vpnConfig{}, false, nil
+}
+
 func (s *configStore) list() []vpnConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -110,6 +131,103 @@ func (s *configStore) getByID(configID string) (vpnConfig, bool) {
 		}
 	}
 	return vpnConfig{}, false
+}
+
+type subscription struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	ConfigID    string `json:"config_id"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
+	LastError   string `json:"last_error,omitempty"`
+	LastSuccess int64  `json:"last_success,omitempty"`
+}
+
+type subscriptionStore struct {
+	mu       sync.RWMutex
+	filePath string
+	items    []subscription
+}
+
+func newSubscriptionStore(filePath string) *subscriptionStore {
+	return &subscriptionStore{filePath: filePath, items: []subscription{}}
+}
+
+func (s *subscriptionStore) load() error {
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var items []subscription
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.items = items
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *subscriptionStore) save() error {
+	s.mu.RLock()
+	data, err := json.MarshalIndent(s.items, "", "  ")
+	s.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.filePath, data, 0o600)
+}
+
+func (s *subscriptionStore) add(item subscription) (subscription, error) {
+	s.mu.Lock()
+	s.items = append(s.items, item)
+	s.mu.Unlock()
+
+	return item, s.save()
+}
+
+func (s *subscriptionStore) list() []subscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]subscription, len(s.items))
+	copy(result, s.items)
+	return result
+}
+
+func (s *subscriptionStore) updateStatus(id, lastError string, lastSuccess int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, item := range s.items {
+		if item.ID == id {
+			item.LastError = lastError
+			item.LastSuccess = lastSuccess
+			item.UpdatedAt = time.Now().Unix()
+			s.items[index] = item
+			return s.save()
+		}
+	}
+	return nil
+}
+
+func (s *subscriptionStore) findByID(id string) (subscription, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, item := range s.items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return subscription{}, false
 }
 
 type vpnState struct {
@@ -177,6 +295,7 @@ type moduleServer struct {
 	pb.UnimplementedModuleServiceServer
 	state *vpnState
 	store *configStore
+	subs  *subscriptionStore
 }
 
 func (s *moduleServer) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PongResponse, error) {
@@ -281,6 +400,10 @@ func main() {
 	if err := store.load(); err != nil {
 		log.Fatalf("failed to load configs: %v", err)
 	}
+	subscriptions := newSubscriptionStore(filepath.Join(*dataDir, "subscriptions.json"))
+	if err := subscriptions.load(); err != nil {
+		log.Fatalf("failed to load subscriptions: %v", err)
+	}
 	state.setConfigCount(store.count())
 
 	listener, err := net.Listen("tcp", *listenAddr)
@@ -289,7 +412,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterModuleServiceServer(grpcServer, &moduleServer{state: state, store: store})
+	pb.RegisterModuleServiceServer(grpcServer, &moduleServer{state: state, store: store, subs: subscriptions})
 
 	go func() {
 		log.Printf("nekkus-vpn gRPC listening on %s", listener.Addr().String())
@@ -299,7 +422,7 @@ func main() {
 	}()
 
 	if *mode == "standalone" {
-		go startHTTPServer(*httpAddr, state, store)
+		go startHTTPServer(*httpAddr, state, store, subscriptions)
 	}
 
 	if *mode == "hub" && *hubAddr != "" {
@@ -339,7 +462,7 @@ func waitForShutdown(grpcServer *grpc.Server) {
 	grpcServer.GracefulStop()
 }
 
-func startHTTPServer(addr string, state *vpnState, store *configStore) {
+func startHTTPServer(addr string, state *vpnState, store *configStore, subs *subscriptionStore) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +498,7 @@ func startHTTPServer(addr string, state *vpnState, store *configStore) {
 				Content:   input.Content,
 				SourceURL: input.SourceURL,
 				CreatedAt: time.Now().Unix(),
+				UpdatedAt: time.Now().Unix(),
 			}
 			config, err := store.add(newConfig)
 			if err != nil {
@@ -386,6 +510,96 @@ func startHTTPServer(addr string, state *vpnState, store *configStore) {
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
+	})
+
+	mux.HandleFunc("/subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, subs.list())
+		case http.MethodPost:
+			var input struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+				return
+			}
+			if input.Name == "" || input.URL == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and url are required"})
+				return
+			}
+
+			content, fetchErr := fetchSubscription(input.URL)
+			if fetchErr != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fetchErr.Error()})
+				return
+			}
+
+			config := vpnConfig{
+				ID:        strconv.FormatInt(time.Now().UnixNano(), 10),
+				Name:      input.Name,
+				Content:   content,
+				SourceURL: input.URL,
+				CreatedAt: time.Now().Unix(),
+				UpdatedAt: time.Now().Unix(),
+			}
+			config, err := store.add(config)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config"})
+				return
+			}
+
+			item := subscription{
+				ID:          strconv.FormatInt(time.Now().UnixNano(), 10),
+				Name:        input.Name,
+				URL:         input.URL,
+				ConfigID:    config.ID,
+				CreatedAt:   time.Now().Unix(),
+				UpdatedAt:   time.Now().Unix(),
+				LastSuccess: time.Now().Unix(),
+			}
+			item, err = subs.add(item)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save subscription"})
+				return
+			}
+
+			state.setConfigCount(store.count())
+			writeJSON(w, http.StatusCreated, item)
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		}
+	})
+
+	mux.HandleFunc("/subscriptions/refresh", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		results := make([]map[string]string, 0)
+		for _, item := range subs.list() {
+			content, err := fetchSubscription(item.URL)
+			if err != nil {
+				_ = subs.updateStatus(item.ID, err.Error(), item.LastSuccess)
+				results = append(results, map[string]string{"id": item.ID, "status": "error"})
+				continue
+			}
+
+			_, ok, updateErr := store.updateContent(item.ConfigID, content)
+			if updateErr != nil || !ok {
+				_ = subs.updateStatus(item.ID, "failed to update config", item.LastSuccess)
+				results = append(results, map[string]string{"id": item.ID, "status": "error"})
+				continue
+			}
+
+			_ = subs.updateStatus(item.ID, "", time.Now().Unix())
+			results = append(results, map[string]string{"id": item.ID, "status": "ok"})
+		}
+
+		state.setConfigCount(store.count())
+		writeJSON(w, http.StatusOK, results)
 	})
 
 	mux.HandleFunc("/connect", func(w http.ResponseWriter, r *http.Request) {
@@ -429,4 +643,28 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func fetchSubscription(url string) (string, error) {
+	client := &http.Client{Timeout: defaultHTTPTimeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("bad response: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	content := string(body)
+	if content == "" {
+		return "", fmt.Errorf("empty subscription content")
+	}
+
+	return content, nil
 }
