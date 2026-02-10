@@ -46,3 +46,8 @@ export type ConnectPayload = {
   config_id?: string
   server?: string
 }
+
+export type VpnSettings = {
+  default_config_id?: string
+  default_server?: string
+}

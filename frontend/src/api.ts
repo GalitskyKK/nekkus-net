@@ -4,6 +4,7 @@ import type {
   CreateSubscriptionPayload,
   Subscription,
   VpnConfig,
+  VpnSettings,
   VpnStatus,
 } from './types'
 
@@ -29,6 +30,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const fetchStatus = () => request<VpnStatus>('/status')
 export const fetchConfigs = () => request<VpnConfig[]>('/configs')
 export const fetchSubscriptions = () => request<Subscription[]>('/subscriptions')
+export const fetchSettings = () => request<VpnSettings>('/settings')
 
 export const addConfig = (payload: CreateConfigPayload) =>
   request<VpnConfig>('/configs', {
@@ -57,3 +59,6 @@ export const disconnectVPN = () =>
   request<VpnStatus>('/disconnect', {
     method: 'POST',
   })
+
+export const fetchServers = (configId: string) =>
+  request<string[]>(`/servers?config_id=${encodeURIComponent(configId)}`)

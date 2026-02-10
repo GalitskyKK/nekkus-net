@@ -6,11 +6,13 @@ import {
   connectVPN,
   disconnectVPN,
   fetchConfigs,
+  fetchSettings,
+  fetchServers,
   fetchStatus,
   fetchSubscriptions,
   refreshSubscriptions,
 } from './api'
-import type { Subscription, VpnConfig, VpnStatus } from './types'
+import type { Subscription, VpnConfig, VpnSettings, VpnStatus } from './types'
 
 const statusRefreshMs = 2000
 
@@ -18,6 +20,7 @@ function App() {
   const [status, setStatus] = useState<VpnStatus | null>(null)
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
+  const [settings, setSettings] = useState<VpnSettings | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
@@ -27,6 +30,10 @@ function App() {
   const [subscriptionUrl, setSubscriptionUrl] = useState('')
   const [connectConfigId, setConnectConfigId] = useState('')
   const [connectServer, setConnectServer] = useState('')
+  const [availableServers, setAvailableServers] = useState<string[]>([])
+  const [selectedServer, setSelectedServer] = useState('')
+  const [preferredServer, setPreferredServer] = useState('')
+  const [defaultsApplied, setDefaultsApplied] = useState(false)
 
   const activeConfig = useMemo(
     () => configs.find((config) => config.id === status?.activeConfigId),
@@ -36,14 +43,16 @@ function App() {
   const loadAll = useCallback(async () => {
     try {
       setErrorMessage(null)
-      const [nextStatus, nextConfigs, nextSubscriptions] = await Promise.all([
+      const [nextStatus, nextConfigs, nextSubscriptions, nextSettings] = await Promise.all([
         fetchStatus(),
         fetchConfigs(),
         fetchSubscriptions(),
+        fetchSettings(),
       ])
       setStatus(nextStatus)
       setConfigs(nextConfigs)
       setSubscriptions(nextSubscriptions)
+      setSettings(nextSettings)
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load data')
     }
@@ -64,6 +73,54 @@ function App() {
     }, statusRefreshMs)
     return () => window.clearInterval(intervalId)
   }, [])
+
+  useEffect(() => {
+    if (!connectConfigId) {
+      setAvailableServers([])
+      setSelectedServer('')
+      return
+    }
+    let cancelled = false
+    const loadServers = async () => {
+      try {
+        const servers = await fetchServers(connectConfigId)
+        if (!cancelled) {
+          setAvailableServers(servers)
+          if (preferredServer && servers.includes(preferredServer)) {
+            setSelectedServer(preferredServer)
+          } else {
+            setSelectedServer(servers[0] ?? '')
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAvailableServers([])
+          setSelectedServer('')
+          setErrorMessage(error instanceof Error ? error.message : 'Не удалось загрузить серверы')
+        }
+      }
+    }
+    void loadServers()
+    return () => {
+      cancelled = true
+    }
+  }, [connectConfigId, preferredServer])
+
+  useEffect(() => {
+    if (defaultsApplied || !settings) {
+      return
+    }
+    if (settings.default_config_id && !connectConfigId) {
+      setConnectConfigId(settings.default_config_id)
+    }
+    if (settings.default_server) {
+      setPreferredServer(settings.default_server)
+      if (!availableServers.length) {
+        setConnectServer(settings.default_server)
+      }
+    }
+    setDefaultsApplied(true)
+  }, [availableServers.length, connectConfigId, defaultsApplied, settings])
 
   const handleCreateConfig = useCallback(async () => {
     if (!configName.trim() || !configContent.trim()) {
@@ -111,7 +168,7 @@ function App() {
   }, [loadAll, subscriptionName, subscriptionUrl])
 
   const handleConnect = useCallback(async () => {
-    if (!connectConfigId && !connectServer.trim()) {
+    if (!connectConfigId && !connectServer.trim() && !selectedServer) {
       setErrorMessage('Выбери конфиг или задай сервер')
       return
     }
@@ -120,15 +177,20 @@ function App() {
       setErrorMessage(null)
       const nextStatus = await connectVPN({
         config_id: connectConfigId || undefined,
-        server: connectServer.trim() || undefined,
+        server: selectedServer || connectServer.trim() || undefined,
       })
       setStatus(nextStatus)
+      if (connectConfigId) {
+        const nextServer = selectedServer || connectServer.trim()
+        setSettings({ default_config_id: connectConfigId, default_server: nextServer })
+        setPreferredServer(nextServer)
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Не удалось подключиться')
     } finally {
       setIsBusy(false)
     }
-  }, [connectConfigId, connectServer])
+  }, [connectConfigId, connectServer, selectedServer])
 
   const handleDisconnect = useCallback(async () => {
     try {
@@ -194,16 +256,33 @@ function App() {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span>Сервер</span>
-            <input
-              type="text"
-              value={connectServer}
-              onChange={(event) => setConnectServer(event.target.value)}
-              placeholder="auto / custom"
-              disabled={isBusy}
-            />
-          </label>
+          {availableServers.length > 0 ? (
+            <label className="field">
+              <span>Сервер</span>
+              <select
+                value={selectedServer}
+                onChange={(event) => setSelectedServer(event.target.value)}
+                disabled={isBusy}
+              >
+                {availableServers.map((server) => (
+                  <option key={server} value={server}>
+                    {server}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="field">
+              <span>Сервер</span>
+              <input
+                type="text"
+                value={connectServer}
+                onChange={(event) => setConnectServer(event.target.value)}
+                placeholder="auto / custom"
+                disabled={isBusy}
+              />
+            </label>
+          )}
         </div>
         <div className="panel__actions">
           <button className="btn btn--primary" onClick={handleConnect} disabled={isBusy}>
