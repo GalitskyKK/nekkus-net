@@ -49,11 +49,12 @@ jobs:
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
 
-      - name: Generate manifest.json from template (без dirty git)
+      - name: Generate manifest for archive (без dirty git)
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          sed "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" manifest.json.template > manifest.json
+          mkdir -p .release
+          sed "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" manifest.json.template > .release/manifest.json
 
       - name: Run GoReleaser (build + archive с manifest)
         uses: goreleaser/goreleaser-action@v5
