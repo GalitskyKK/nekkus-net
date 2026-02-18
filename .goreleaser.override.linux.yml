@@ -1,5 +1,4 @@
-# Оставляем только linux для раннера ubuntu.
-# Важно: при мерже конфигов override заменяет весь блок builds — указываем main и binary явно.
+# Ubuntu = amd64. Webview/systray — CGO, только нативная сборка.
 builds:
   - id: nekkus-net
     main: ./cmd
@@ -8,6 +7,5 @@ builds:
       - linux
     goarch:
       - amd64
-      - arm64
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
