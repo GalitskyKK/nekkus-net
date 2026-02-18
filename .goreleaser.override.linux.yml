@@ -1,5 +1,13 @@
 # Оставляем только linux для раннера ubuntu.
+# Важно: при мерже конфигов override заменяет весь блок builds — указываем main и binary явно.
 builds:
   - id: nekkus-net
+    main: ./cmd
+    binary: nekkus-net
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
