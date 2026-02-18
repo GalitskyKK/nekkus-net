@@ -1,20 +1,17 @@
 # Релиз бинарников nekkus-net в GitHub Releases.
 # Триггер: git tag v* и push (например v0.1.0).
+# В CI используется matrix: каждый раннер собирает только свою ОС (см. override-файлы).
 
 project_name: nekkus-net
-
-before:
-  hooks:
-    - sh -c "cd frontend && npm install && npm run build"
 
 builds:
   - id: nekkus-net
     main: ./cmd
     binary: nekkus-net
-    # darwin исключён: fyne.io/systray и webview требуют нативной сборки на macOS
     goos:
       - linux
       - windows
+      - darwin
     goarch:
       - amd64
       - arm64
