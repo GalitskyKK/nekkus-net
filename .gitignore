@@ -6,5 +6,3 @@ data
 *.syso
 sing-box
 release
-manifest.json
-release_assets
