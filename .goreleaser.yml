@@ -25,10 +25,12 @@ archives:
       - goos: windows
         format: zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
-    # Папка внутри архива — хаб ожидает modules/<id>/manifest.json, id = com.nekkus.net
-    wrap_in_directory: "com.nekkus.net"
+    # Литерал в шаблоне: иначе "com.nekkus.net" парсится как поле
+    wrap_in_directory: '{{ `com.nekkus.net` }}'
+    # Без дефолтных LICENSE/README; манифест из release_assets (не в .gitignore)
     files:
-      - src: .release/manifest.json
+      - none*
+      - src: release_assets/manifest.json
         dst: .
 
 release:

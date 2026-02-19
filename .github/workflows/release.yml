@@ -53,8 +53,8 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          mkdir -p .release
-          sed "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" manifest.json.template > .release/manifest.json
+          mkdir -p release_assets
+          sed "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/" manifest.json.template > release_assets/manifest.json
 
       - name: Run GoReleaser (build + archive с manifest)
         uses: goreleaser/goreleaser-action@v5
