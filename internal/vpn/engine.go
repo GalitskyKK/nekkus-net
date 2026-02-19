@@ -234,6 +234,7 @@ func (e *Engine) Connect(serverID string) error {
 	}
 
 	e.process = exec.Command(status.Path, "run", "-c", cfgPath)
+	setProcessNoWindow(e.process)
 	var stderrBuf bytes.Buffer
 	e.process.Stderr = &stderrBuf
 	if err := e.process.Start(); err != nil {
