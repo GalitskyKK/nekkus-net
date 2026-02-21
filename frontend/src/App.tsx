@@ -508,6 +508,11 @@ function App() {
           </Card>
         </Section>
       </div>
+      {import.meta.env.VITE_BUILD_ID ? (
+        <div className="net__build-id" title="Версия сборки">
+          Build: {import.meta.env.VITE_BUILD_ID}
+        </div>
+      ) : null}
     </PageLayout>
   )
 }

@@ -196,3 +196,11 @@
     grid-column: 1;
   }
 }
+
+.net__build-id {
+  margin-top: 16px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #64748b;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}

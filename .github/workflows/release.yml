@@ -46,10 +46,16 @@ jobs:
       - name: Build frontend
         env:
           VITE_OUT_DIR: dist
+          VITE_BUILD_ID: ${{ github.ref_name }}-${{ github.run_id }}
         run: cd frontend && npm ci && npm run build
 
       - name: Copy frontend dist for embed
         run: mkdir -p ui/frontend && cp -r frontend/dist ui/frontend/
+
+      - name: Verify embed has frontend
+        run: |
+          test -f ui/frontend/dist/index.html || (echo "ui/frontend/dist missing index.html" && exit 1)
+          ls -la ui/frontend/dist/
 
       - name: Generate manifest
         run: |
