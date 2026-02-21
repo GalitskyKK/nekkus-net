@@ -46,9 +46,6 @@ jobs:
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
 
-      - name: Copy frontend dist for embed
-        run: mkdir -p ui/frontend && cp -r frontend/dist ui/frontend/
-
       - name: Generate manifest
         run: |
           VERSION="${{ github.ref_name }}"
