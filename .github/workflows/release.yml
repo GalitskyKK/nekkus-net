@@ -43,10 +43,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev pkg-config
 
-      - name: Build frontend (Vite outDir: ui/frontend/dist)
-        run: |
-          mkdir -p ui/frontend
-          cd frontend && npm ci && npm run build
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - name: Verify frontend embed
+        run: test -f ui/frontend/dist/index.html || (echo "Missing ui/frontend/dist - embed will be stale" && exit 1)
 
       - name: Generate manifest
         run: |
