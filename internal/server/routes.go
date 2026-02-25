@@ -58,9 +58,25 @@ func RegisterRoutes(srv *coreserver.Server, engine *vpn.Engine) {
 			totalLifetimeDownload = tot.TotalDownload
 			totalLifetimeUpload = tot.TotalUpload
 		}
+		// Список серверов по умолчанию (для выбора из Hub без открытия Net).
+		serversList := []string{}
+		if settings, err := engine.GetSettings(); err == nil && settings.DefaultConfigID != "" {
+			if nodes, err := engine.GetServersByConfigID(settings.DefaultConfigID); err == nil {
+				for _, n := range nodes {
+					name := n.Name
+					if name == "" {
+						name = n.ID
+					}
+					if name != "" {
+						serversList = append(serversList, name)
+					}
+				}
+			}
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"connected":             connected,
 			"server":                serverName,
+			"servers":               serversList,
 			"activeConfigId":        "",
 			"configCount":           0,
 			"downloadSpeed":         downloadSpeed,
