@@ -12,6 +12,7 @@ import (
 
 const subscriptionsFile = "subscriptions.json"
 const settingsFile = "settings.json"
+const trafficStatsFile = "traffic_stats.json"
 
 type Settings struct {
 	// SingBoxPath — полный путь до sing-box (например, C:\Tools\sing-box\sing-box.exe).
@@ -39,6 +40,13 @@ type Subscription struct {
 	Name      string       `json:"name"`
 	Servers   []ServerNode `json:"servers"`
 	UpdatedAt int64        `json:"updated_at"`
+	ExpiresAt int64        `json:"expires_at,omitempty"` // Unix; 0 = неизвестно (опционально из заголовков подписки)
+}
+
+// TotalTrafficStats — накопленный трафик за всё время (сессии суммируются).
+type TotalTrafficStats struct {
+	TotalDownload int64 `json:"total_download"`
+	TotalUpload   int64 `json:"total_upload"`
 }
 
 type Store struct {
@@ -47,6 +55,7 @@ type Store struct {
 	subscriptions []Subscription
 	servers       []ServerNode
 	settings      Settings
+	totalTraffic  TotalTrafficStats
 }
 
 func New(dataDir string) (*Store, error) {
@@ -60,6 +69,9 @@ func New(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	if err := s.loadSettings(); err != nil {
+		return nil, err
+	}
+	if err := s.loadTotalTraffic(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -276,4 +288,78 @@ func (s *Store) GetServer(serverID string) (*ServerNode, error) {
 		}
 	}
 	return nil, fmt.Errorf("server not found: %s", serverID)
+}
+
+func (s *Store) loadTotalTraffic() error {
+	path := filepath.Join(s.dataDir, trafficStatsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var t TotalTrafficStats
+	if err := json.Unmarshal(data, &t); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.totalTraffic = t
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) saveTotalTraffic(t TotalTrafficStats) error {
+	path := filepath.Join(s.dataDir, trafficStatsFile)
+	if err := os.MkdirAll(s.dataDir, 0750); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.totalTraffic = t
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) AddTotalTraffic(download, upload int64) error {
+	s.mu.Lock()
+	next := s.totalTraffic
+	next.TotalDownload += download
+	next.TotalUpload += upload
+	s.mu.Unlock()
+	return s.saveTotalTraffic(next)
+}
+
+func (s *Store) GetTotalTraffic() (TotalTrafficStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalTraffic, nil
+}
+
+func (s *Store) DeleteSubscription(id string) error {
+	s.mu.Lock()
+	var list []Subscription
+	for _, sub := range s.subscriptions {
+		if sub.ID != id {
+			list = append(list, sub)
+		}
+	}
+	found := len(list) < len(s.subscriptions)
+	s.subscriptions = list
+	s.mu.Unlock()
+	if !found {
+		return fmt.Errorf("subscription not found: %s", id)
+	}
+	return s.writeSubscriptions(list)
+}
+
+// ResetSettings сбрасывает настройки к умолчанию (пустые). Подписки и трафик не трогает.
+func (s *Store) ResetSettings() error {
+	return s.saveSettings(Settings{})
 }

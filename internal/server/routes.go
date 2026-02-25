@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	coreserver "github.com/GalitskyKK/nekkus-core/pkg/server"
 	"github.com/GalitskyKK/nekkus-net/internal/store"
+	"github.com/GalitskyKK/nekkus-net/internal/sitecheck"
 	"github.com/GalitskyKK/nekkus-net/internal/vpn"
 )
 
@@ -51,16 +53,23 @@ func RegisterRoutes(srv *coreserver.Server, engine *vpn.Engine) {
 			totalDownload = stats.Download
 			totalUpload = stats.Upload
 		}
+		totalLifetimeDownload, totalLifetimeUpload := int64(0), int64(0)
+		if tot, err := engine.GetTotalTraffic(); err == nil {
+			totalLifetimeDownload = tot.TotalDownload
+			totalLifetimeUpload = tot.TotalUpload
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"connected":       connected,
-			"server":          serverName,
-			"activeConfigId":  "",
-			"configCount":     0,
-			"downloadSpeed":   downloadSpeed,
-			"uploadSpeed":     uploadSpeed,
-			"totalDownload":   totalDownload,
-			"totalUpload":     totalUpload,
-			"lastUpdateUnix":  time.Now().Unix(),
+			"connected":             connected,
+			"server":                serverName,
+			"activeConfigId":        "",
+			"configCount":           0,
+			"downloadSpeed":         downloadSpeed,
+			"uploadSpeed":           uploadSpeed,
+			"totalDownload":         totalDownload,
+			"totalUpload":           totalUpload,
+			"totalLifetimeDownload": totalLifetimeDownload,
+			"totalLifetimeUpload":   totalLifetimeUpload,
+			"lastUpdateUnix":        time.Now().Unix(),
 		})
 	})
 
@@ -253,13 +262,83 @@ func RegisterRoutes(srv *coreserver.Server, engine *vpn.Engine) {
 
 	srv.Mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, _ *http.Request) {
 		setCORS(w)
+		logs := engine.GetLogs()
+		if logs == nil {
+			logs = []string{}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{})
+		json.NewEncoder(w).Encode(logs)
 	})
 
 	srv.Mux.HandleFunc("POST /api/subscriptions/refresh", func(w http.ResponseWriter, _ *http.Request) {
 		setCORS(w)
 		results := engine.RefreshAllSubscriptions()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+	})
+
+	srv.Mux.HandleFunc("POST /api/subscriptions/{id}/refresh", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "id required", 400)
+			return
+		}
+		if err := engine.RefreshSubscription(id); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"id": id, "status": "ok"})
+	})
+
+	srv.Mux.HandleFunc("DELETE /api/subscriptions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "id required", 400)
+			return
+		}
+		if err := engine.DeleteSubscription(id); err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv.Mux.HandleFunc("POST /api/settings/reset", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		if err := engine.ResetSettings(); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		settings, _ := engine.GetSettings()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(settings)
+	})
+
+	srv.Mux.HandleFunc("GET /api/site-check", func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w)
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		timeout := 8 * time.Second
+		var sites []sitecheck.Site
+		if url := r.URL.Query().Get("url"); url != "" {
+			if s := sitecheck.SiteByURL(url); s != nil {
+				sites = []sitecheck.Site{*s}
+			} else {
+				sites = []sitecheck.Site{{Name: url, URL: url}}
+			}
+		} else if name := r.URL.Query().Get("name"); name != "" {
+			if s := sitecheck.SiteByName(name); s != nil {
+				sites = []sitecheck.Site{*s}
+			} else {
+				sites = sitecheck.DefaultSites
+			}
+		} else {
+			sites = sitecheck.DefaultSites
+		}
+		results := sitecheck.Check(ctx, nil, sites, timeout)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
 	})

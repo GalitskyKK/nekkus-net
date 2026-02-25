@@ -7,6 +7,8 @@ export type VpnStatus = {
   uploadSpeed: number
   totalDownload: number
   totalUpload: number
+  totalLifetimeDownload?: number
+  totalLifetimeUpload?: number
   lastUpdateUnix: number
 }
 
@@ -24,11 +26,13 @@ export type Subscription = {
   id: string
   name: string
   url: string
-  config_id: string
-  created_at: number
-  updated_at: number
+  config_id?: string
+  created_at?: number
+  updated_at?: number
+  expires_at?: number
   last_error?: string
   last_success?: number
+  servers?: Array<{ id?: string; name?: string }>
 }
 
 export type CreateConfigPayload = {
@@ -58,4 +62,12 @@ export type SingBoxStatus = {
   path?: string
   version?: string
   source?: 'env' | 'settings' | 'path' | 'installed'
+}
+
+export type SiteCheckResult = {
+  name: string
+  url: string
+  ok: boolean
+  latency_ms?: number
+  error?: string
 }

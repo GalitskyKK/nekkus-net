@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -19,6 +21,8 @@ import (
 	"github.com/GalitskyKK/nekkus-net/internal/store"
 	"github.com/GalitskyKK/nekkus-net/internal/subscription"
 )
+
+var ansiEsc = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type Status string
 
@@ -37,13 +41,46 @@ type TrafficStats struct {
 	StartedAt     int64 `json:"started_at"`
 }
 
+const maxLogLines = 500
+
 type Engine struct {
-	store       *store.Store
-	status      Status
-	statusMu    sync.RWMutex
-	currentNode *store.ServerNode
-	process     *exec.Cmd
+	store         *store.Store
+	status        Status
+	statusMu      sync.RWMutex
+	currentNode   *store.ServerNode
+	process       *exec.Cmd
 	lastConfigPath string
+	logBuf        []string
+	logMu         sync.RWMutex
+}
+
+// logWriter собирает stderr процесса в строки и пишет в e.logBuf.
+type logWriter struct {
+	e   *Engine
+	buf []byte
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimSpace(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+		line = ansiEsc.ReplaceAllString(line, "")
+		if line == "" {
+			continue
+		}
+		w.e.logMu.Lock()
+		w.e.logBuf = append(w.e.logBuf, line)
+		if len(w.e.logBuf) > maxLogLines {
+			w.e.logBuf = w.e.logBuf[len(w.e.logBuf)-maxLogLines:]
+		}
+		w.e.logMu.Unlock()
+	}
+	return len(p), nil
 }
 
 func NewEngine(st *store.Store) *Engine {
@@ -51,6 +88,18 @@ func NewEngine(st *store.Store) *Engine {
 		store:  st,
 		status: Disconnected,
 	}
+}
+
+// GetLogs возвращает последние строки вывода sing-box (stderr). Пустой слайс, если процесс не запускался или логи не собирались.
+func (e *Engine) GetLogs() []string {
+	e.logMu.RLock()
+	defer e.logMu.RUnlock()
+	if len(e.logBuf) == 0 {
+		return nil
+	}
+	out := make([]string, len(e.logBuf))
+	copy(out, e.logBuf)
+	return out
 }
 
 func (e *Engine) GetStatus() Status {
@@ -146,17 +195,30 @@ func (e *Engine) GetServers() ([]store.ServerNode, error) {
 }
 
 // GetServersByConfigID возвращает серверы подписки с id=configID; если подписка не найдена — все серверы.
-// Всегда возвращает не-nil слайс (пустой при отсутствии серверов), чтобы API отдавал JSON [] а не null.
+// В список попадают только серверы с поддерживаемым sing-box URI (vmess/vless/trojan/ss, без xhttp и т.п.).
+// Всегда возвращает не-nil слайс.
 func (e *Engine) GetServersByConfigID(configID string) ([]store.ServerNode, error) {
+	var list []store.ServerNode
 	if configID != "" {
-		if sub, err := e.store.GetSubscription(configID); err == nil {
-			if sub.Servers != nil {
-				return sub.Servers, nil
-			}
+		if sub, err := e.store.GetSubscription(configID); err == nil && sub.Servers != nil {
+			list = sub.Servers
+		} else {
+			return []store.ServerNode{}, nil
+		}
+	} else {
+		var err error
+		list, err = e.store.GetServers()
+		if err != nil || list == nil {
 			return []store.ServerNode{}, nil
 		}
 	}
-	return e.store.GetServers()
+	filtered := make([]store.ServerNode, 0, len(list))
+	for _, s := range list {
+		if IsURISupported(s.URI) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
 }
 
 // RefreshResult — результат обновления одной подписки.
@@ -238,7 +300,10 @@ func (e *Engine) Connect(serverID string) error {
 	e.process = exec.Command(status.Path, "run", "-c", cfgPath)
 	setProcessNoWindow(e.process)
 	var stderrBuf bytes.Buffer
-	e.process.Stderr = &stderrBuf
+	e.logMu.Lock()
+	e.logBuf = nil
+	e.logMu.Unlock()
+	e.process.Stderr = io.MultiWriter(&stderrBuf, &logWriter{e: e})
 	if err := e.process.Start(); err != nil {
 		e.setStatus(Error)
 		return fmt.Errorf("sing-box start error: %w", err)
@@ -290,6 +355,11 @@ func (e *Engine) waitForProxyPort(host string, port int, timeout time.Duration, 
 }
 
 func (e *Engine) Disconnect() error {
+	// Учитываем трафик текущей сессии в общую статистику до сброса состояния.
+	if stats, err := e.GetTrafficStats(); err == nil && (stats.Download > 0 || stats.Upload > 0) {
+		_ = e.store.AddTotalTraffic(stats.Download, stats.Upload)
+	}
+
 	// Сразу снимаем системный прокси, чтобы при убийстве процесса из Hub прокси не оставался включённым.
 	clearSystemProxy()
 	if e.process != nil && e.process.Process != nil {
@@ -315,6 +385,30 @@ func (e *Engine) Disconnect() error {
 	e.setStatus(Disconnected)
 	log.Println("Disconnected")
 	return nil
+}
+
+func (e *Engine) GetTotalTraffic() (store.TotalTrafficStats, error) {
+	return e.store.GetTotalTraffic()
+}
+
+func (e *Engine) DeleteSubscription(id string) error {
+	// Если подключены к серверу из этой подписки — отключаемся.
+	if e.currentNode != nil {
+		sub, _ := e.store.GetSubscription(id)
+		if sub != nil {
+			for _, n := range sub.Servers {
+				if n.ID == e.currentNode.ID || n.Name == e.currentNode.Name {
+					_ = e.Disconnect()
+					break
+				}
+			}
+		}
+	}
+	return e.store.DeleteSubscription(id)
+}
+
+func (e *Engine) ResetSettings() error {
+	return e.store.ResetSettings()
 }
 
 func (e *Engine) QuickConnect() error {

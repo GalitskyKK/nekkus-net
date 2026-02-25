@@ -57,6 +57,13 @@ func (e *Engine) generateSingboxConfig(server *store.ServerNode) (string, error)
 	return string(encoded), nil
 }
 
+// IsURISupported возвращает true, если URI поддерживается sing-box (vmess, vless, trojan, ss с транспортами tcp/ws/grpc).
+// Используется для фильтрации списка серверов в UI (например, xhttp и др. не показываем).
+func IsURISupported(uri string) bool {
+	_, err := outboundFromURI(uri)
+	return err == nil
+}
+
 func outboundFromURI(raw string) (map[string]any, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

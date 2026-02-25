@@ -52,6 +52,107 @@
   gap: 16px;
 }
 
+.net__card--placeholder {
+  display: block;
+}
+
+.net__card--placeholder .nekkus-add-placeholder {
+  width: 100%;
+}
+
+.net__profile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.net__profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.net__profile-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.net__title-icon {
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
+.net__profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
+.net__meta--row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.net__profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+  padding-top: 8px;
+  border-top: 1px solid #1e1e2e;
+}
+
+.net__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #e2e8f0;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+.net__stat--muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.net__stat-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.net__btn-icon {
+  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.net__card--profile .net__btn-icon {
+  margin-right: 4px;
+}
+
+.net__spin {
+  animation: net-spin 0.8s linear infinite;
+}
+
+@keyframes net-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.net__hint {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
 .net__metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -155,6 +256,55 @@
   border-radius: 10px;
   background: #1a1a2e;
   border: 1px solid #1e1e2e;
+}
+
+.net__list-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.net__list-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.net__meta--muted {
+  color: #64748b;
+}
+
+.net__row--compact {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.net__site-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.net__site-check-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.net__site-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.net__site-check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .net__list-title {

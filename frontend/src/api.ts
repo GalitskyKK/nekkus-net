@@ -3,6 +3,7 @@ import type {
   CreateConfigPayload,
   CreateSubscriptionPayload,
   SingBoxStatus,
+  SiteCheckResult,
   Subscription,
   VpnConfig,
   VpnSettings,
@@ -29,6 +30,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(text || `Request failed: ${response.status}`)
   }
 
+  if (response.status === 204) {
+    return undefined as T
+  }
   return response.json() as Promise<T>
 }
 
@@ -62,6 +66,30 @@ export const addSubscription = (payload: CreateSubscriptionPayload) =>
 
 export const refreshSubscriptions = () =>
   request<Array<{ id: string; status: string }>>('/api/subscriptions/refresh', {
+    method: 'POST',
+  })
+
+export const deleteSubscription = (id: string) =>
+  request<void>(`/api/subscriptions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+
+export const resetSettings = () =>
+  request<void>('/api/settings/reset', {
+    method: 'POST',
+  })
+
+export const fetchSiteCheck = (params?: { name?: string; url?: string }) =>
+  request<SiteCheckResult[]>(
+    params?.url
+      ? `/api/site-check?url=${encodeURIComponent(params.url)}`
+      : params?.name
+        ? `/api/site-check?name=${encodeURIComponent(params.name)}`
+        : '/api/site-check',
+  )
+
+export const refreshSubscription = (id: string) =>
+  request<{ id: string; status: string }>(`/api/subscriptions/${encodeURIComponent(id)}/refresh`, {
     method: 'POST',
   })
 
