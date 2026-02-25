@@ -323,6 +323,9 @@ func (e *Engine) Connect(serverID string) error {
 
 	e.currentNode = server
 	e.setStatus(Connected)
+	if server.ID != "" {
+		_, _ = e.store.UpdateSettings(store.Settings{LastConnectedServerID: server.ID})
+	}
 	log.Printf("Connected to %s", server.Name)
 	return nil
 }

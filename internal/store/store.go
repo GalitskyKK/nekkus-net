@@ -22,6 +22,10 @@ type Settings struct {
 	// Эти поля нужны UI, чтобы запоминать выбор пользователя.
 	DefaultConfigID string `json:"default_config_id,omitempty"`
 	DefaultServer   string `json:"default_server,omitempty"`
+
+	// LastConnectedServerID — последний успешно подключённый сервер (ID или Name).
+	// При старте из Hub модуль подключается к нему автоматически.
+	LastConnectedServerID string `json:"last_connected_server_id,omitempty"`
 }
 
 // Subscription и ServerNode — типы для VPN (используются engine и API).
@@ -180,6 +184,9 @@ func (s *Store) UpdateSettings(patch Settings) (Settings, error) {
 	}
 	if patch.DefaultServer != "" {
 		next.DefaultServer = patch.DefaultServer
+	}
+	if patch.LastConnectedServerID != "" {
+		next.LastConnectedServerID = patch.LastConnectedServerID
 	}
 	if err := s.saveSettings(next); err != nil {
 		return Settings{}, err

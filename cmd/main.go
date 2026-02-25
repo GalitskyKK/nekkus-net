@@ -128,12 +128,20 @@ func main() {
 
 	runHeadless := *headless || (*mode == "hub" && !showUIFromHub)
 	if runHeadless {
-		// Запуск из Hub по кнопке «Запустить»: авто-подключение к последнему/первому серверу и прокси
+		// Запуск из Hub по кнопке «Запустить»: авто-подключение к последнему серверу (или Quick Connect)
 		if *mode == "hub" && autoConnectFromHub {
 			go func() {
 				time.Sleep(1 * time.Second) // дать подняться HTTP/gRPC
-				if err := engine.QuickConnect(); err != nil {
-					log.Printf("auto-connect: %v", err)
+				settings, _ := db.GetSettings()
+				if settings.LastConnectedServerID != "" {
+					if err := engine.Connect(settings.LastConnectedServerID); err != nil {
+						log.Printf("auto-connect to last server: %v, trying quick connect", err)
+						_ = engine.QuickConnect()
+					}
+				} else {
+					if err := engine.QuickConnect(); err != nil {
+						log.Printf("auto-connect: %v", err)
+					}
 				}
 			}()
 		}
